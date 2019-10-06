@@ -14,6 +14,28 @@ namespace IndriApollo.elm327
             ELM_NOT_DETECTED = -4
         };
 
+        public enum FuelSystemStatus : byte
+        {
+            NOT_PRESENT = 0,
+            OPEN_LOOP_INSUFFICIENT_ENGINE_TEMPERATURE = 1,
+            CLOSED_LOOP_USING_OXYGEN_SENSOR_FEEDBACK_TO_DETERMINE_FUEL_MIX = 2,
+            OPEN_LOOP_ENGINE_LOAD_OR_DECELERATION_FUEL_CUT = 4,
+            OPEN_LOOP_SYSTEM_FAILURE = 8,
+            CLOSED_LOOP_USING_OXYGEN_SENSOR_BUT_FEEDBACK_FAULT = 16
+        };
+
+        public enum IgnitionType
+        {
+            SPARK_IGNITION = 0,
+            COMPRESSION_IGNITION = 1
+        }
+
+        public struct MonitorStatus
+        {
+            public bool MIL { get; set; }
+            public byte DTC_CNT { get; set; }
+        };
+
         public const int BAUDRATE = 38400;
         public const Parity PARITY = Parity.None;
         public int DATABITS = 8;
@@ -100,7 +122,53 @@ namespace IndriApollo.elm327
 
         public void ListSupportedPids()
         {
+            const string testStr = "41 00 BE 3E F8 11";
+            //const string testStr = "41 20 80 00 00 00";
+            string bitmaskStr = testStr.Substring(6).Replace(" ", String.Empty);
+            UInt32 bitmask = UInt32.Parse(bitmaskStr, System.Globalization.NumberStyles.HexNumber);
+            Console.WriteLine(bitmask);
+            for(byte i = 0; i < 32; i++)
+            {
+                bool pidSupported = (((bitmask << i)&0x80000000) != 0);
+                Console.WriteLine($"{(StandardPids.Pids)(i+1)} {(pidSupported ? "yes" : "no")}");
+            }
+        }
+
+        public MonitorStatus ReadMonitorStatusSinceDtcsCleared()
+        {
             //
+        }
+
+        public UInt16 ReadEngineRPM()
+        {
+            const UInt16 testData = 0x0BB0;
+            return testData>>2;
+        }
+
+        public byte ReadIntakeManifoldAbsolutePressure()
+        {
+            const byte testByte = 0x25;
+            return testByte;
+        }
+
+        public FuelSystemStatus[] ReadFuelSystemStatus()
+        {
+            const UInt16 testData = 0x0200;
+            FuelSystemStatus fuelSystem1 = (FuelSystemStatus)(testData>>8);
+            FuelSystemStatus fuelSystem2 = (FuelSystemStatus)(testData&0x00FF);
+            return new FuelSystemStatus[] { fuelSystem1, fuelSystem2 };
+        }
+
+        public byte ReadCalculatedEngineLoad()
+        {
+            const byte testByte = 126;
+            return (byte)(testByte/2.55f);
+        }
+
+        public Int16 ReadEngineCoolantTemperature()
+        {
+            const byte testByte = 0x35;
+            return testByte - 40;
         }
     }
 }

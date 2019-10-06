@@ -6,7 +6,13 @@ namespace IndriApollo.elm327
     {
         static int Main(string[] args)
         {
-            if(args.Length != 1)
+            var elm = new ELM327OBD2();
+            elm.ListSupportedPids();
+            Console.WriteLine(elm.ReadCalculatedEngineLoad());
+            Console.WriteLine(elm.ReadEngineCoolantTemperature());
+            Console.WriteLine(elm.ReadFuelSystemStatus()[0]+Environment.NewLine+elm.ReadFuelSystemStatus()[1]);
+            Console.WriteLine(elm.ReadEngineRPM());
+            /*if(args.Length != 1)
             {
                 Console.WriteLine("Missing serial port arg");
                 return 1;
@@ -24,7 +30,7 @@ namespace IndriApollo.elm327
             }
             Console.WriteLine(elmVersion);
 
-            Console.WriteLine(elm.ReadBatteryVoltage());
+            Console.WriteLine(elm.ReadBatteryVoltage());*/
 
             return 0;
         }
