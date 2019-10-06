@@ -66,10 +66,17 @@ namespace IndriApollo.elm327
                 _serialPort.ReadLine(); // <cr>
                 _serialPort.ReadLine(); // <cr>
                 versionString = _serialPort.ReadLine();
+                _serialPort.DiscardInBuffer();
+
                 if(!versionString.StartsWith("ELM327"))
                 {
                     return ConnectionStatus.ELM_NOT_DETECTED;
                 }
+
+                _serialPort.WriteLine("ATSP0");
+                _serialPort.ReadLine(); // echo
+                _serialPort.ReadLine(); // OK
+                _serialPort.DiscardInBuffer();
             }
             catch(TimeoutException)
             {
@@ -77,6 +84,23 @@ namespace IndriApollo.elm327
             }
 
             return ConnectionStatus.CONNECTED;
+        }
+
+        public string ReadBatteryVoltage()
+        {
+            string voltage = null;
+            _serialPort.ReadTimeout = 1000;
+            _serialPort.WriteLine("ATRV");
+            _serialPort.ReadLine(); // echo
+            voltage = _serialPort.ReadLine(); // voltage
+            _serialPort.DiscardInBuffer();
+
+            return voltage;
+        }
+
+        public void ListSupportedPids()
+        {
+            //
         }
     }
 }
