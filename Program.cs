@@ -10,8 +10,20 @@ namespace IndriApollo.elm327
             elm.ListSupportedPids();
             Console.WriteLine(elm.ReadCalculatedEngineLoad());
             Console.WriteLine(elm.ReadEngineCoolantTemperature());
-            Console.WriteLine(elm.ReadFuelSystemStatus()[0]+Environment.NewLine+elm.ReadFuelSystemStatus()[1]);
+            var fss = elm.ReadFuelSystemStatus();
+            Console.WriteLine(fss[0]);
+            Console.WriteLine(fss[1]);
             Console.WriteLine(elm.ReadEngineRPM());
+            var status = elm.ReadMonitorStatusSinceDtcsCleared();
+            Console.WriteLine($"MIL/CEL: {status.MIL}");
+            Console.WriteLine($"DTC count: {status.DTC_CNT}");
+            Console.WriteLine($"Ignition type: {status.IGNITION_TYPE}");
+            for(byte i = 0; i < status.TESTS.Length; i++)
+            {
+                Console.WriteLine($"Component: {status.TESTS[i].Component}");
+                Console.WriteLine($"Test available: {(status.TESTS[i].TestAvailable ? "yes" : "no")}");
+                Console.WriteLine($"Test incomplete: {(status.TESTS[i].TestIncomplete ? "yes" : "no")}");
+            }
             /*if(args.Length != 1)
             {
                 Console.WriteLine("Missing serial port arg");

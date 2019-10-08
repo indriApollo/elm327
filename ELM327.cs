@@ -1,5 +1,6 @@
 using System;
 using System.IO.Ports;
+using System.Collections.Generic;
 
 namespace IndriApollo.elm327
 {
@@ -28,12 +29,46 @@ namespace IndriApollo.elm327
         {
             SPARK_IGNITION = 0,
             COMPRESSION_IGNITION = 1
-        }
+        };
+
+        public enum EngineTestComponent
+        {
+            COMPONENTS = 2,
+            FUEL_SYSTEM = 1,
+            MISFIRE = 0,
+            // Spark ignition test at offset 10
+            EGR_SYSTEM = 17,
+            OXYGEN_SENSOR_HEATER = 16,
+            OXYGEN_SENSOR = 15,
+            AC_REFRIGERANT = 14,
+            SECONDARY_AIR_SYSTEM = 13,
+            EVAPORATIVE_SYSTEM = 12,
+            HEATED_CATALYST = 11,
+            CATALYST = 10,
+            // Compression ignition test at offset 10
+            EGR_VVT_SYSTEM = 27,
+            PM_FILTER_MONITORING = 26,
+            EXHAUST_GAS_SENSOR = 25,
+            // RESERVED
+            BOOST_PRESSURE = 23,
+            // RESERVED
+            NOX_SCR_MONITOR = 21,
+            NMHC_CATALYST = 20
+        };
+
+        public struct EngineTest
+        {
+            public EngineTestComponent Component { get; set; }
+            public bool TestAvailable { get; set; }
+            public bool TestIncomplete { get; set; }
+        };
 
         public struct MonitorStatus
         {
             public bool MIL { get; set; }
             public byte DTC_CNT { get; set; }
+            public IgnitionType IGNITION_TYPE { get; set; }
+            public EngineTest[] TESTS { get; set; }
         };
 
         public const int BAUDRATE = 38400;
@@ -129,14 +164,54 @@ namespace IndriApollo.elm327
             Console.WriteLine(bitmask);
             for(byte i = 0; i < 32; i++)
             {
-                bool pidSupported = (((bitmask << i)&0x80000000) != 0);
+                bool pidSupported = ((bitmask&(1<<i)) != 0);
                 Console.WriteLine($"{(StandardPids.Pids)(i+1)} {(pidSupported ? "yes" : "no")}");
             }
         }
 
         public MonitorStatus ReadMonitorStatusSinceDtcsCleared()
         {
-            //
+            const UInt32 testData = 0x81068000;
+            byte A = (byte)(testData>>24);
+            byte B = (byte)((testData>>16)&0xFF);
+            byte C = (byte)((testData>>8)&0xFF);
+            byte D = (byte)(testData&0xFF);
+            
+            MonitorStatus status = new MonitorStatus();
+
+            // parse byte A
+            status.MIL = (A&(1<<7)) != 1;
+            status.DTC_CNT = (byte)(A&~(1<<7));
+            
+            List<EngineTest> tests = new List<EngineTest>();
+            // parse byte B
+            status.IGNITION_TYPE = (B&(1<<3)) == 0 ? IgnitionType.SPARK_IGNITION : IgnitionType.COMPRESSION_IGNITION;
+            for(byte i = 0; i < 3; i++)
+            {
+                tests.Add(new EngineTest {
+                    Component = (EngineTestComponent)i,
+                    TestAvailable = (B&(1<<i)) != 0,
+                    TestIncomplete = (B&(1<<(i+4))) != 0
+                });
+            }
+            // parse bytes C & D
+            byte enumOffset = (byte)(status.IGNITION_TYPE == IgnitionType.SPARK_IGNITION  ? 10 : 20);
+            for(byte i = 0; i < 8; i++)
+            {
+                if(status.IGNITION_TYPE == IgnitionType.COMPRESSION_IGNITION && (i == 2 || i == 4))
+                {
+                    continue; // skip RESERVED
+                }
+
+                tests.Add(new EngineTest {
+                    Component = (EngineTestComponent)i+enumOffset,
+                    TestAvailable = (C&(1<<i)) != 0,
+                    TestIncomplete = (D&(1<<(i))) != 0
+                });
+            }
+            status.TESTS = tests.ToArray();
+
+            return status;
         }
 
         public UInt16 ReadEngineRPM()
