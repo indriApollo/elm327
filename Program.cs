@@ -6,25 +6,7 @@ namespace IndriApollo.elm327
     {
         static int Main(string[] args)
         {
-            var elm = new ELM327OBD2();
-            elm.ListSupportedPids();
-            Console.WriteLine(elm.ReadCalculatedEngineLoad());
-            Console.WriteLine(elm.ReadEngineCoolantTemperature());
-            var fss = elm.ReadFuelSystemStatus();
-            Console.WriteLine(fss[0]);
-            Console.WriteLine(fss[1]);
-            Console.WriteLine(elm.ReadEngineRPM());
-            var status = elm.ReadMonitorStatusSinceDtcsCleared();
-            Console.WriteLine($"MIL/CEL: {status.MIL}");
-            Console.WriteLine($"DTC count: {status.DTC_CNT}");
-            Console.WriteLine($"Ignition type: {status.IGNITION_TYPE}");
-            for(byte i = 0; i < status.TESTS.Length; i++)
-            {
-                Console.WriteLine($"Component: {status.TESTS[i].Component}");
-                Console.WriteLine($"Test available: {(status.TESTS[i].TestAvailable ? "yes" : "no")}");
-                Console.WriteLine($"Test incomplete: {(status.TESTS[i].TestIncomplete ? "yes" : "no")}");
-            }
-            /*if(args.Length != 1)
+            if(args.Length != 1)
             {
                 Console.WriteLine("Missing serial port arg");
                 return 1;
@@ -42,7 +24,25 @@ namespace IndriApollo.elm327
             }
             Console.WriteLine(elmVersion);
 
-            Console.WriteLine(elm.ReadBatteryVoltage());*/
+            elm.ListSupportedPids();
+            Console.WriteLine($"Distance travelled with MIL on: {elm.ReadDistanceTravelledWithMILOn()}");
+
+            var mstatus = elm.ReadMonitorStatusSinceDtcsCleared();
+            Console.WriteLine($"MIL/CEL: {mstatus.MIL}");
+            Console.WriteLine($"DTC count: {mstatus.DTC_CNT}");
+
+            bool run = true;
+            while(run)
+            {
+                Console.WriteLine($"Battery voltage: {elm.ReadBatteryVoltage()}");
+                Console.WriteLine($"RPM: {elm.ReadEngineRPM()}");
+                Console.WriteLine($"Speed: {elm.ReadVehicleSpeed()} Kph");
+                Console.WriteLine($"Coolant: {elm.ReadEngineCoolantTemperature()} C");
+                Console.WriteLine($"Intake air temperature: {elm.ReadIntakeAirTemperature()} C");
+                Console.WriteLine($"Engine load: {elm.ReadCalculatedEngineLoad()} %");
+                Console.WriteLine($"Throttle: {elm.ReadThrottlePosition()} %");
+                Console.WriteLine($"Intake manifold absolute  pressure: {elm.ReadIntakeManifoldAbsolutePressure()} Kpa");
+            }
 
             return 0;
         }

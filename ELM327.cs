@@ -1,6 +1,7 @@
 using System;
 using System.IO.Ports;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace IndriApollo.elm327
 {
@@ -71,7 +72,7 @@ namespace IndriApollo.elm327
             public EngineTest[] TESTS { get; set; }
         };
 
-        public const int BAUDRATE = 38400;
+        public const int BAUDRATE = 115200;
         public const Parity PARITY = Parity.None;
         public int DATABITS = 8;
         public StopBits STOPBITS = StopBits.One;
@@ -117,23 +118,19 @@ namespace IndriApollo.elm327
             // by performing a reset
             try
             {
-                _serialPort.ReadTimeout = 1000;
-                _serialPort.WriteLine("ATZ");
-                _serialPort.ReadLine(); // echo
-                _serialPort.ReadLine(); // <cr>
-                _serialPort.ReadLine(); // <cr>
-                versionString = _serialPort.ReadLine();
-                _serialPort.DiscardInBuffer();
+                Transmit("ATZ");
+                Receive(1000, false, false); // <cr>
+                Receive(1000, false, false); // <cr>
+                versionString = Receive(1000, true, false);
 
                 if(!versionString.StartsWith("ELM327"))
                 {
                     return ConnectionStatus.ELM_NOT_DETECTED;
                 }
 
-                _serialPort.WriteLine("ATSP0");
-                _serialPort.ReadLine(); // echo
-                _serialPort.ReadLine(); // OK
-                _serialPort.DiscardInBuffer();
+                // Set interface protocol to auto
+                Transmit("ATSP0");
+                Receive(1000, true, false); // OK
             }
             catch(TimeoutException)
             {
@@ -143,44 +140,88 @@ namespace IndriApollo.elm327
             return ConnectionStatus.CONNECTED;
         }
 
-        public string ReadBatteryVoltage()
+        public bool SetBaudrateTo115200()
         {
-            string voltage = null;
-            _serialPort.ReadTimeout = 1000;
-            _serialPort.WriteLine("ATRV");
-            _serialPort.ReadLine(); // echo
-            voltage = _serialPort.ReadLine(); // voltage
-            _serialPort.DiscardInBuffer();
+            if(!Transmit("ATPP0CSV23"))
+            {
+                return false;
+            }
+            if(Receive(1000, true, false) != "OK")
+            {
+                return false;
+            }
 
-            return voltage;
+            if(!Transmit("ATPP0CON"))
+            {
+                return false;
+            }
+            if(Receive(1000, true, false) != "OK")
+            {
+                return false;
+            }
+
+            return true;
         }
 
-        public void ListSupportedPids()
+        public string ReadBatteryVoltage()
         {
-            const string testStr = "41 00 BE 3E F8 11";
-            //const string testStr = "41 20 80 00 00 00";
-            string bitmaskStr = testStr.Substring(6).Replace(" ", String.Empty);
-            UInt32 bitmask = UInt32.Parse(bitmaskStr, System.Globalization.NumberStyles.HexNumber);
-            Console.WriteLine(bitmask);
-            for(byte i = 0; i < 32; i++)
+            Transmit("ATRV");
+            return Receive(1000, true, false);
+        }
+
+        public StandardPids.Pids[] ListSupportedPids()
+        {
+            List<StandardPids.Pids> supportedPids = new List<StandardPids.Pids>();
+
+            // const string testStr = "41 00 BE 3E F8 11";
+            
+            byte offset = 0;
+            UInt32 bitmask;
+            do
             {
-                bool pidSupported = ((bitmask&(1<<i)) != 0);
-                Console.WriteLine($"{(StandardPids.Pids)(i+1)} {(pidSupported ? "yes" : "no")}");
+                Transmit($"01{offset.ToString("X2")}");
+                string res = Receive(1000, false, false); // result or SEARCHING...
+                if(res == "SEARCHING...")
+                {
+                    res = Receive(10000, false, false);
+                }
+                FlushRx();
+
+                string bitmaskStr = res.Substring(6).Replace(" ", String.Empty);
+                bitmask = UInt32.Parse(bitmaskStr, NumberStyles.HexNumber);
+
+                for(byte i = offset; i < offset+31; i++)
+                {
+                    bool pidSupported = ((bitmask&(0x80000000>>i)) != 0);
+                    if(pidSupported)
+                    {
+                        supportedPids.Add((StandardPids.Pids)(i+1));
+                    }
+                    Console.WriteLine($"{(StandardPids.Pids)(i+1)} {(pidSupported ? "yes" : "no")}");
+                }
+                offset+=32;
             }
+            while(((bitmask&1) != 0));
+
+            return supportedPids.ToArray();
         }
 
         public MonitorStatus ReadMonitorStatusSinceDtcsCleared()
         {
-            const UInt32 testData = 0x81068000;
-            byte A = (byte)(testData>>24);
-            byte B = (byte)((testData>>16)&0xFF);
-            byte C = (byte)((testData>>8)&0xFF);
-            byte D = (byte)(testData&0xFF);
+            Transmit("0101");
+            string res = Receive(); // result
+            UInt32 bitmask = UInt32.Parse(res, NumberStyles.HexNumber);
+
+            // const UInt32 testData = 0x00276101;
+            byte A = (byte)(bitmask>>24);
+            byte B = (byte)((bitmask>>16)&0xFF);
+            byte C = (byte)((bitmask>>8)&0xFF);
+            byte D = (byte)(bitmask&0xFF);
             
             MonitorStatus status = new MonitorStatus();
 
             // parse byte A
-            status.MIL = (A&(1<<7)) != 1;
+            status.MIL = (A&(1<<7)) != 0;
             status.DTC_CNT = (byte)(A&~(1<<7));
             
             List<EngineTest> tests = new List<EngineTest>();
@@ -216,14 +257,49 @@ namespace IndriApollo.elm327
 
         public UInt16 ReadEngineRPM()
         {
-            const UInt16 testData = 0x0BB0;
-            return testData>>2;
+            // const UInt16 testData = 0x0BB0;
+            Transmit("010C");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            UInt16 rawRpm = UInt16.Parse(res, NumberStyles.HexNumber);
+            return (UInt16)(rawRpm>>2);
+        }
+
+        public byte ReadVehicleSpeed()
+        {
+            Transmit("010D");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            return byte.Parse(res, NumberStyles.HexNumber);
         }
 
         public byte ReadIntakeManifoldAbsolutePressure()
         {
-            const byte testByte = 0x25;
-            return testByte;
+            //const byte testByte = 0x25;
+            Transmit("010B");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            return byte.Parse(res, NumberStyles.HexNumber);
+        }
+
+        public UInt16 ReadDistanceTravelledWithMILOn()
+        {
+            Transmit("0121");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            return UInt16.Parse(res, NumberStyles.HexNumber);
         }
 
         public FuelSystemStatus[] ReadFuelSystemStatus()
@@ -236,14 +312,119 @@ namespace IndriApollo.elm327
 
         public byte ReadCalculatedEngineLoad()
         {
-            const byte testByte = 126;
-            return (byte)(testByte/2.55f);
+            //const byte testByte = 126;
+            Transmit("0104");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            byte rawLoad = byte.Parse(res, NumberStyles.HexNumber);
+            return (byte)(rawLoad/2.55f);
+        }
+
+        public byte ReadThrottlePosition()
+        {
+            //const byte testByte = 126;
+            Transmit("0111");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            byte rawLoad = byte.Parse(res, NumberStyles.HexNumber);
+            return (byte)(rawLoad/2.55f);
         }
 
         public Int16 ReadEngineCoolantTemperature()
         {
-            const byte testByte = 0x35;
-            return testByte - 40;
+            //const byte testByte = 0x35;
+            Transmit("0105");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            byte rawTemp = byte.Parse(res, NumberStyles.HexNumber);
+            return (byte)(rawTemp - 40);
+        }
+
+        public Int16 ReadIntakeAirTemperature()
+        {
+            //const byte testByte = 0x35;
+            Transmit("010F");
+            string res = Receive();
+            if(res == null)
+            {
+                return 0;
+            }
+            byte rawTemp = byte.Parse(res, NumberStyles.HexNumber);
+            return (byte)(rawTemp - 40);
+        }
+
+        private bool Transmit(string cmd, bool echo=true)
+        {
+            try
+            {
+                //Console.WriteLine($"Tx: {cmd}");
+                _serialPort.WriteLine(cmd);
+                if(echo)
+                {
+                    return Receive(1000, false, false).Replace(">", "") == cmd; // echo (sometimes with > prompt)
+                }
+                return true;
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine($"Transmit error: {e}");
+                return false;
+            }
+        }
+
+        private string Receive(int timeout=1000, bool flush=true, bool trim=true)
+        {
+            try
+            {
+                //Console.WriteLine($"Rx timeout: {timeout}");
+                _serialPort.ReadTimeout = timeout;
+                string rx = _serialPort.ReadLine();
+                //Console.WriteLine($"Rx: {rx}");
+                if(flush)
+                {
+                    FlushRx();
+                }
+                if(trim)
+                {
+                    rx = rx.Substring(6).Replace(" ", String.Empty);
+                }
+                return rx;
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine($"Receive error: {e}");
+                return null;
+            }
+        }
+
+        private void FlushRx()
+        {
+            _serialPort.ReadTimeout = 100;
+            try
+            {
+                while(true)
+                {
+                    // Read and discard anything till timeout
+                    _serialPort.ReadLine();
+                }
+            }
+            catch(TimeoutException)
+            {
+                //Console.WriteLine("Rx was flushed");
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine($"Flush Rx error: {e}");
+            }
         }
     }
 }
